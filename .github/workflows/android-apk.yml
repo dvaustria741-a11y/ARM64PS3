@@ -5,11 +5,15 @@ name: Build Android APKs (all variants)
 # (github.repository == 'RPCS3/rpcs3'); this workflow is the one that actually
 # runs here.
 #
-# Builds all four release variants from android/build-variants.sh (legacy/a11/a13/a15).
-# a13 (API 33, sdk33) is split into its own job with no dependencies so it starts
-# immediately and uploads as soon as it's done. legacy/a11/a15 run afterward, as a matrix,
-# gated on `needs: build-a13` -- that's what actually guarantees a13 finishes first, rather
-# than just hoping three same-cost parallel builds happen to race in our favor.
+# TEMPORARILY sdk33/a13 ONLY. android/build-variants.sh documents four release variants
+# (legacy/a11/a13/a15); the build-other-variants job for the remaining three is commented
+# out below rather than deleted, so it's a one-line uncomment once a13 is confirmed green
+# end-to-end -- no point burning three more ~1hr builds on each iteration while a13 itself
+# is still being debugged (libadrenotools' linkernsbypass submodule, etc).
+# a13 (API 33, sdk33) is its own job with no dependencies so it starts immediately and
+# uploads as soon as it's done. When build-other-variants comes back, gate it on
+# `needs: build-a13` -- that's what guarantees a13 finishes first, rather than hoping three
+# same-cost parallel builds happen to race in our favor.
 
 on:
   push:
@@ -43,28 +47,28 @@ jobs:
       arm_march: armv8.2-a+dotprod+fp16
       variant_suffix: a13-armv8.2-sdk33
 
-  build-other-variants:
-    name: Android APK (${{ matrix.variant }})
-    needs: build-a13
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - variant: legacy
-            android_api: 30
-            arm_march: armv8.1-a
-            variant_suffix: legacy-armv8.1-sdk30
-          - variant: a11
-            android_api: 30
-            arm_march: armv8.2-a+dotprod+fp16
-            variant_suffix: a11-armv8.2-sdk30
-          - variant: a15
-            android_api: 35
-            arm_march: armv8.2-a+dotprod+fp16
-            variant_suffix: a15-armv8.2-sdk35
-    uses: ./.github/workflows/android-apk-variant.yml
-    with:
-      variant: ${{ matrix.variant }}
-      android_api: ${{ matrix.android_api }}
-      arm_march: ${{ matrix.arm_march }}
-      variant_suffix: ${{ matrix.variant_suffix }}
+  # build-other-variants:
+  #   name: Android APK (${{ matrix.variant }})
+  #   needs: build-a13
+  #   strategy:
+  #     fail-fast: false
+  #     matrix:
+  #       include:
+  #         - variant: legacy
+  #           android_api: 30
+  #           arm_march: armv8.1-a
+  #           variant_suffix: legacy-armv8.1-sdk30
+  #         - variant: a11
+  #           android_api: 30
+  #           arm_march: armv8.2-a+dotprod+fp16
+  #           variant_suffix: a11-armv8.2-sdk30
+  #         - variant: a15
+  #           android_api: 35
+  #           arm_march: armv8.2-a+dotprod+fp16
+  #           variant_suffix: a15-armv8.2-sdk35
+  #   uses: ./.github/workflows/android-apk-variant.yml
+  #   with:
+  #     variant: ${{ matrix.variant }}
+  #     android_api: ${{ matrix.android_api }}
+  #     arm_march: ${{ matrix.arm_march }}
+  #     variant_suffix: ${{ matrix.variant_suffix }}
