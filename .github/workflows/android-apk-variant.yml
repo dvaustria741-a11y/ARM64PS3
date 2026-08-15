@@ -78,7 +78,23 @@ jobs:
       - name: Build core (LLVM + RPCS3, arm64)
         run: |
           CMAKE_BIN="${ANDROID_HOME}/cmake/${CMAKE_VERSION}/bin"
-          PATH="${CMAKE_BIN}:${PATH}" ninja -C "build-${{ inputs.variant }}" android/libarmsx3-core.so armsx3_lsfg
+          BUILD_DIR="build-${{ inputs.variant }}"
+          export PATH="${CMAKE_BIN}:${PATH}"
+
+          # Required target.
+          ninja -C "$BUILD_DIR" android/libarmsx3-core.so
+
+          # armsx3_lsfg is optional: 3rdparty/lsfg/CMakeLists.txt only defines it when
+          # 3rdparty/lsfg/lsfg-vk-android is present, and that source isn't a registered
+          # git submodule anywhere in this repo (README/.gitmodules), so a fresh CI
+          # checkout never has it -- ninja reports "unknown target" if asked for it
+          # directly. Build it only if CMake actually registered it; the strip step
+          # already handles a missing .so by shipping without frame generation.
+          if ninja -C "$BUILD_DIR" -t targets | grep -q '^armsx3_lsfg:'; then
+            ninja -C "$BUILD_DIR" armsx3_lsfg
+          else
+            echo "armsx3_lsfg target not registered (3rdparty/lsfg/lsfg-vk-android absent) -- skipping, frame generation will be absent from this APK" >&2
+          fi
 
       - name: Strip and stage native libs
         run: |
