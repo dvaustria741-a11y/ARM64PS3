@@ -1,0 +1,130 @@
+name: Build one Android APK variant
+
+on:
+  workflow_call:
+    inputs:
+      variant:
+        required: true
+        type: string
+      android_api:
+        required: true
+        type: number
+      arm_march:
+        required: true
+        type: string
+      variant_suffix:
+        required: true
+        type: string
+
+env:
+  NDK_VERSION: 29.0.14206865
+  CMAKE_VERSION: 3.30.5
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: Free disk space
+        # A cold LLVM (BUILD_LLVM=ON, STATIC_LINK_LLVM=ON) + RPCS3 build eats far more disk
+        # than the ~26 GB free on a stock ubuntu-latest runner. Strip preinstalled toolchains
+        # we don't use rather than fight ENOSPC mid-link.
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk/ndk-bundle \
+            /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/.ghcup \
+            /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          docker image prune -af || true
+          df -h /
+
+      - name: Checkout ARMSX3
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Checkout librashader
+        uses: actions/checkout@v4
+        with:
+          repository: SnowflakePowered/librashader
+          path: 3rdparty/librashader
+
+      - name: Checkout libadrenotools
+        uses: actions/checkout@v4
+        with:
+          repository: bylaws/libadrenotools
+          path: android/armsx3-ui/app/src/main/cpp/libadrenotools
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK and CMake
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "ndk;${NDK_VERSION}" "cmake;${CMAKE_VERSION}" "platform-tools" "platforms;android-${{ inputs.android_api }}"
+
+      - name: Configure (CMake + Ninja)
+        # Mirrors android/build-variants.sh's build_variant(): configure.sh forwards extra
+        # cmake args straight through, so the -march override rides along here too.
+        run: |
+          NDK_VERSION="${NDK_VERSION}" ANDROID_API="${{ inputs.android_api }}" \
+            BUILD_DIR="${GITHUB_WORKSPACE}/build-${{ inputs.variant }}" \
+            bash android/configure.sh "-DARMSX3_ARM_MARCH=${{ inputs.arm_march }}"
+
+      - name: Build core (LLVM + RPCS3, arm64)
+        run: |
+          CMAKE_BIN="${ANDROID_HOME}/cmake/${CMAKE_VERSION}/bin"
+          PATH="${CMAKE_BIN}:${PATH}" ninja -C "build-${{ inputs.variant }}" android/libarmsx3-core.so armsx3_lsfg
+
+      - name: Strip and stage native libs
+        run: |
+          STRIP="${ANDROID_HOME}/ndk/${NDK_VERSION}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+          NM="${ANDROID_HOME}/ndk/${NDK_VERSION}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
+          JNI_LIBS="android/armsx3-ui/app/src/main/jniLibs/arm64-v8a"
+          BUILD_DIR="build-${{ inputs.variant }}"
+          mkdir -p "$JNI_LIBS"
+
+          "$STRIP" --strip-unneeded -o "$JNI_LIBS/libarmsx3-core.so" "$BUILD_DIR/android/libarmsx3-core.so"
+
+          LSFG_SO="$BUILD_DIR/3rdparty/lsfg/libarmsx3_lsfg.so"
+          if [ -f "$LSFG_SO" ]; then
+            "$STRIP" --strip-unneeded -o "$JNI_LIBS/libarmsx3_lsfg.so" "$LSFG_SO"
+            # Frame-gen isolation check from build-variants.sh: only its own entry points may
+            # be dynamic symbols. A leaked vk*/LSFG export means the linker can bind the
+            # renderer's Vulkan calls to framegen's copies.
+            leaked=$("$NM" -D --defined-only "$JNI_LIBS/libarmsx3_lsfg.so" 2>/dev/null | grep -cE "vk[A-Z]|LSFG" || true)
+            if [ "$leaked" != "0" ]; then
+              echo "libarmsx3_lsfg.so exports $leaked Vulkan/LSFG symbols -- isolation broken, refusing to package it" >&2
+              exit 1
+            fi
+          else
+            echo "libarmsx3_lsfg.so was not built, frame generation will be absent from this APK" >&2
+            rm -f "$JNI_LIBS/libarmsx3_lsfg.so"
+          fi
+
+      - name: Assemble release APK
+        run: |
+          cd android/armsx3-ui
+          chmod +x gradlew
+          ./gradlew --quiet :app:assembleRelease "-Parmsx3.minSdk=${{ inputs.android_api }}"
+
+      - name: Rename APK to release convention
+        id: apk
+        run: |
+          VERSION=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' android/armsx3-ui/app/build.gradle.kts | head -1)
+          SRC="android/armsx3-ui/app/build/outputs/apk/release/app-release.apk"
+          OUT="ARMSX3-${VERSION}-${{ inputs.variant_suffix }}.apk"
+          cp "$SRC" "$OUT"
+          echo "path=$OUT" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.apk.outputs.path }}
+          path: ${{ steps.apk.outputs.path }}
+          compression-level: 0
+          if-no-files-found: error
