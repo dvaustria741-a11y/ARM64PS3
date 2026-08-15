@@ -1430,10 +1430,12 @@ private fun StickWidget(cfg: TouchButtonCfg, edit: Boolean) {
             alpha = opacity,
             modifier = Modifier
                 .fillMaxSize()
-                .offset(
-                    x = with(density) { baseShift.value.x.toDp() },
-                    y = with(density) { baseShift.value.y.toDp() },
-                ),
+                // Lambda-based offset: reads baseShift.value during the LAYOUT phase, not
+                // composition. baseShift barely changes (only on stick reposition/resize in
+                // the editor) so this one was never the hot path, but it's kept consistent
+                // with the thumb offset below rather than mixing the two styles on sibling
+                // nodes.
+                .offset { IntOffset(baseShift.value.x.roundToInt(), baseShift.value.y.roundToInt()) },
         )
         val thumbSizeDp = cfg.sizeDp * 0.62f
         Image(
@@ -1444,10 +1446,20 @@ private fun StickWidget(cfg: TouchButtonCfg, edit: Boolean) {
             alpha = opacity,
             modifier = Modifier
                 .align(Alignment.Center)
-                .offset(
-                    x = with(density) { (baseShift.value.x + thumb.value.x).toDp() },
-                    y = with(density) { (baseShift.value.y + thumb.value.y).toDp() },
-                )
+                // thumb.value changes on every raw pointer-move while dragging (60-120/sec).
+                // Modifier.offset(x: Dp, y: Dp) reads state at COMPOSITION time, so every one
+                // of those moves forced a full recomposition of this node -- real CPU work
+                // competing with the emulation thread on every frame of a stick drag, which is
+                // exactly what showed up as "dragging the joystick lags the game." The
+                // lambda overload reads thumb.value during layout instead, which only
+                // re-lays-out and re-draws this node -- no recomposition, and no px->Dp->px
+                // round trip either.
+                .offset {
+                    IntOffset(
+                        (baseShift.value.x + thumb.value.x).roundToInt(),
+                        (baseShift.value.y + thumb.value.y).roundToInt(),
+                    )
+                }
                 .size(thumbSizeDp.dp),
         )
         // The extra analog button is no longer drawn here — it is its own widget (AnalogExtraWidget)
