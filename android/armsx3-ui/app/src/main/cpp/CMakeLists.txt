@@ -34,14 +34,26 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
 # The prebuilt libdiscord_partner_sdk.so ships in the .aar too; it is referenced
 # here as an IMPORTED target so the bridge links, and the .aar is what actually
 # packages it.
+#
+# Optional feature: the SDK is proprietary and deliberately not committed to
+# this repo (see .gitignore) - a normal checkout, and every CI build, simply
+# won't have app/src/main/cpp/discord_sdk/ populated. Only build this target
+# when someone has actually fetched the SDK into place; DiscordNative.java's
+# System.loadLibrary("armsx2_discord") already wraps its call in a try/catch
+# for exactly this case, so skipping the target here just means that catch
+# path is what runs at install time - no crash, Discord presence is simply
+# unavailable.
 # ---------------------------------------------------------------------------
-if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+set(DISCORD_SDK_LIB ${CMAKE_CURRENT_SOURCE_DIR}/discord_sdk/arm64-v8a/libdiscord_partner_sdk.so)
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" AND EXISTS ${DISCORD_SDK_LIB})
     add_library(discord_partner_sdk SHARED IMPORTED)
     set_target_properties(discord_partner_sdk PROPERTIES
-        IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/discord_sdk/arm64-v8a/libdiscord_partner_sdk.so)
+        IMPORTED_LOCATION ${DISCORD_SDK_LIB})
 
     add_library(armsx2_discord SHARED discord_bridge.cpp)
     target_include_directories(armsx2_discord PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/discord_sdk/include)
     target_compile_features(armsx2_discord PRIVATE cxx_std_17)
     target_link_libraries(armsx2_discord discord_partner_sdk log android)
+else()
+    message(STATUS "Discord Social SDK not staged at ${DISCORD_SDK_LIB} - skipping armsx2_discord (optional feature)")
 endif()
