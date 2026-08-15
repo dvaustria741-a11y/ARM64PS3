@@ -19,12 +19,14 @@ on:
       - 'rpcs3/**'
       - '3rdparty/**'
       - '.github/workflows/android-apk.yml'
+      - '.github/workflows/android-apk-variant.yml'
   pull_request:
     paths:
       - 'android/**'
       - 'rpcs3/**'
       - '3rdparty/**'
       - '.github/workflows/android-apk.yml'
+      - '.github/workflows/android-apk-variant.yml'
   workflow_dispatch:
 
 concurrency:
