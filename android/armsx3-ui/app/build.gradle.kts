@@ -167,7 +167,19 @@ dependencies {
     // without this the :discord process aborts with ClassNotFoundException even
     // though the .so links fine. proguard-rules.pro keeps them from being
     // renamed for the same reason.
-    implementation(files("libs/discord_partner_sdk.aar"))
+    //
+    // Optional, same as the CMake side (see app/src/main/cpp/CMakeLists.txt):
+    // the SDK is deliberately excluded from git, so a normal checkout - and
+    // every CI build - won't have this .aar staged. DiscordPresence.available()
+    // and the Friends UI already treat that as a normal, fully-supported state
+    // (see EmulationMenuScreen.kt), so guard on the file actually being present
+    // rather than failing dependency resolution when it isn't.
+    val discordSdkAar = file("libs/discord_partner_sdk.aar")
+    if (discordSdkAar.exists()) {
+        implementation(files(discordSdkAar))
+    } else {
+        logger.lifecycle("Discord Social SDK not staged at $discordSdkAar - building without Discord presence/friends (optional feature)")
+    }
 
     implementation(libs.androidx.browser)
 
